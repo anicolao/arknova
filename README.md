@@ -53,8 +53,11 @@ companions for secrecy and detail, not isolated copies of the whole game.
 - **Versioned games:** Saved sessions remain replayable after software and card
   data evolve.
 
-See [DESIGN_OVERVIEW.md](./DESIGN_OVERVIEW.md) for the architecture and
-[RULES_SUMMARY.md](./RULES_SUMMARY.md) for the base-game rules reference.
+See [DESIGN_OVERVIEW.md](./DESIGN_OVERVIEW.md) for the product architecture,
+[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md) for the proposed
+implementation architecture, [E2E_GUIDE.md](./E2E_GUIDE.md) for the full-stack
+testing contract, and [RULES_SUMMARY.md](./RULES_SUMMARY.md) for the base-game
+rules reference.
 
 ## Status
 
