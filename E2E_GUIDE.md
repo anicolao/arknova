@@ -223,10 +223,7 @@ README Markdown directly.
 Example:
 
 ```ts
-const journey = new MultiSurfaceStepHelper(
-  { table, seat1, seat2 },
-  testInfo
-);
+const journey = new MultiSurfaceStepHelper(testInfo);
 
 journey.setMetadata(
   'Private card, public enclosure',
@@ -235,33 +232,57 @@ journey.setMetadata(
 
 await journey.step('animal-selected', {
   description: 'Seat 1 selected an animal while the table awaits a target.',
-  capture: ['table', 'seat1', 'seat2'],
-  verifications: [
+  surfaces: [
     {
-      spec: 'The table identifies seat 1 without showing the card',
-      check: async ({ table }) => {
-        await expect(table.getByTestId('pending-seat')).toHaveText('Seat 1');
-        await expect(table.getByText('Synthetic Ibex')).toHaveCount(0);
-      }
+      id: 'table',
+      name: 'Shared table',
+      page: table,
+      verifications: [
+        {
+          spec: 'The table identifies seat 1 without showing the card',
+          check: async () => {
+            await expect(table.getByTestId('pending-seat')).toHaveText('Seat 1');
+            await expect(table.getByText('Synthetic Ibex')).toHaveCount(0);
+          }
+        }
+      ]
     },
     {
-      spec: 'Seat 1 sees the selected private card',
-      check: async ({ seat1 }) => {
-        await expect(seat1.getByRole('button', { name: 'Synthetic Ibex' }))
-          .toHaveAttribute('aria-pressed', 'true');
-      }
+      id: 'player-1',
+      name: 'Player 1 companion',
+      page: seat1,
+      verifications: [{
+        spec: 'Seat 1 sees the selected private card',
+        check: async () => expect(
+          seat1.getByRole('button', { name: 'Synthetic Ibex' })
+        ).toHaveAttribute('aria-pressed', 'true')
+      }]
     },
     {
-      spec: 'Seat 2 cannot see seat 1 private card',
-      check: async ({ seat2 }) => {
-        await expect(seat2.getByText('Synthetic Ibex')).toHaveCount(0);
-      }
+      id: 'player-2',
+      name: 'Player 2 companion',
+      page: seat2,
+      verifications: [{
+        spec: 'Seat 2 cannot see seat 1 private card',
+        check: async () => expect(seat2.getByText('Synthetic Ibex')).toHaveCount(0)
+      }]
     }
   ]
 });
 
 journey.generateDocs();
 ```
+
+The helper is the only API allowed to create scenario screenshots and README
+content. Scenario specs must not call `test.step()`,
+`expect(page).toHaveScreenshot()`, manually construct numbered screenshot
+filenames, or hand-edit the generated README. Each helper step describes one
+observable point in the user journey. User actions occur between helper steps.
+
+For a multi-device step, define each captured surface with its own page and
+verification list. Those verifications are the assertions printed immediately
+beneath that surface's screenshot in the generated README. A surface without at
+least one verification is invalid.
 
 The helper must:
 
@@ -275,7 +296,10 @@ The helper must:
 - fail if `generateDocs()` is omitted for a documented scenario.
 
 Actions happen between steps. Verifications and screenshots happen inside steps.
-Do not take decorative screenshots that assert nothing.
+Every meaningful user-facing transition gets a step, including initial state,
+post-action state, cross-device connection, and recovery. Do not take decorative
+screenshots that assert nothing, and do not place undocumented assertions between
+steps.
 
 ## 8. Synchronization Rules
 

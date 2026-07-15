@@ -1,79 +1,105 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { MultiSurfaceStepHelper, type Surface } from '../helpers/multi-surface-step-helper';
+import { TestServer } from '../helpers/test-server';
 
-let serverProcess: ChildProcess;
-let dataDir: string;
-let origin: string;
+const server = new TestServer();
 
-async function startServer() {
-  serverProcess = spawn(resolve('.e2e/arknova'), ['-listen', new URL(origin).host, '-data', dataDir, '-web', resolve('build'), '-public-url', origin], {
-    env: { ...process.env, ARKNOVA_E2E: '1', ARKNOVA_ALLOW_TEST_CONTROLS: '1', ARKNOVA_FIXED_NOW_MS: '1710504000000', ARKNOVA_DETERMINISTIC_IDS: '1' },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  serverProcess.stdout?.on('data', (chunk) => process.stdout.write(`[server] ${chunk}`));
-  serverProcess.stderr?.on('data', (chunk) => process.stderr.write(`[server] ${chunk}`));
-  await expect.poll(async () => fetch(`${origin}/healthz`).then((response) => response.ok).catch(() => false), { timeout: 2_000 }).toBe(true);
-}
+test.beforeAll(async () => server.initialize());
+test.afterAll(async () => server.dispose());
 
-async function stopServer() {
-  if (!serverProcess || serverProcess.exitCode !== null) return;
-  serverProcess.kill('SIGTERM');
-  await new Promise<void>((resolveExit) => serverProcess.once('exit', () => resolveExit()));
-}
+test('host creates a game and every device recovers after restart', async ({ browser }, testInfo) => {
+  const walkthrough = new MultiSurfaceStepHelper(testInfo);
+  walkthrough.setMetadata(
+    'Create and Connect',
+    'A host creates a two-player game on the shared table, both players join on private devices, and every surface recovers from the canonical action log after the server restarts.'
+  );
 
-test.beforeAll(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), 'arknova-e2e-'));
-  origin = 'http://127.0.0.1:4173';
-  await startServer();
-});
-
-test.afterAll(async () => { await stopServer(); await rm(dataDir, { recursive: true, force: true }); });
-
-test('host creates a game and every device recovers after restart', async ({ browser }) => {
   const tableContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const seat1Context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const seat2Context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  const table = await tableContext.newPage();
 
-  await test.step('The host creates a two-player game', async () => {
-    await table.goto(`${origin}/table`);
+  try {
+    const table = await tableContext.newPage();
+    await table.goto(`${server.origin}/table`);
+    await walkthrough.step('table_ready', {
+      description: 'The host opens the shared table and can start a two-player game.',
+      surfaces: [{
+        id: 'table', name: 'Shared table', page: table,
+        verifications: [
+          { spec: 'Ark Nova table heading is visible', check: async () => expect(table.getByRole('heading', { name: 'Ark Nova' })).toBeVisible() },
+          { spec: 'Two-player game can be started', check: async () => expect(table.getByRole('button', { name: 'Start two-player game' })).toBeEnabled() }
+        ]
+      }]
+    });
+
     await table.getByRole('button', { name: 'Start two-player game' }).click();
-    await expect(table.getByTestId('game-code')).toHaveText('WILD');
-    await expect(table.getByTestId('projection-revision')).toHaveText('Revision 1');
-    await expect(table.getByTestId('seat-1-qr').getByRole('img')).toBeVisible();
-    await expect(table).toHaveScreenshot('000-game-created--table.png');
-  });
+    await walkthrough.step('game_created', {
+      description: 'Creating the game durably configures two seats and displays their stable QR URLs.',
+      surfaces: [{
+        id: 'table', name: 'Shared table', page: table,
+        verifications: [
+          { spec: 'Deterministic game code WILD is visible', check: async () => expect(table.getByTestId('game-code')).toHaveText('WILD') },
+          { spec: 'Projection revision is 1', check: async () => expect(table.getByTestId('projection-revision')).toHaveText('Revision 1') },
+          { spec: 'Player 1 QR code is visible', check: async () => expect(table.getByTestId('seat-1-qr').getByRole('img')).toBeVisible() },
+          { spec: 'Player 2 QR code is visible', check: async () => expect(table.getByTestId('seat-2-qr').getByRole('img')).toBeVisible() },
+          { spec: 'Exactly one GameConfigured action exists in the canonical log', check: verifyCanonicalAction }
+        ]
+      }]
+    });
 
-  const actions = await fetch(`${origin}/api/games/WILD/actions`).then((response) => response.json());
-  expect(actions).toHaveLength(1);
-  expect(actions[0]).toMatchObject({ type: 'GameConfigured', payload: { playerCount: 2 } });
+    const seat1 = await openCompanion(seat1Context, 1);
+    const seat2 = await openCompanion(seat2Context, 2);
+    await walkthrough.step('players_connected', {
+      description: 'Both players join from isolated private devices while the table retains the public view.',
+      surfaces: [tableSurface(table), companionSurface(seat1, 1), companionSurface(seat2, 2)]
+    });
 
-  const seat1 = await openCompanion(seat1Context, 1);
-  const seat2 = await openCompanion(seat2Context, 2);
-  await expect(seat1).toHaveScreenshot('001-connected--seat-1.png');
-  await expect(seat2).toHaveScreenshot('001-connected--seat-2.png');
-
-  await test.step('All devices recover from the canonical action log after server restart', async () => {
-    await stopServer();
-    await startServer();
+    await server.stop();
+    await server.start();
     await Promise.all([table.reload(), seat1.reload(), seat2.reload()]);
-    await expect(table.getByTestId('game-code')).toHaveText('WILD');
-    await expect(table.getByTestId('projection-revision')).toHaveText('Revision 1');
-    await expect(seat1.getByRole('heading', { name: 'Player 1' })).toBeVisible();
-    await expect(seat2.getByRole('heading', { name: 'Player 2' })).toBeVisible();
-    await expect(seat1.getByTestId('projection-revision')).toHaveText('Revision 1');
-    await expect(seat2.getByTestId('projection-revision')).toHaveText('Revision 1');
-  });
+    await walkthrough.step('server_restarted', {
+      description: 'After a real server restart, all devices recover the same game and revision without credentials or reconfiguration.',
+      surfaces: [tableSurface(table), companionSurface(seat1, 1), companionSurface(seat2, 2)]
+    });
+
+    walkthrough.generateDocs();
+  } finally {
+    await Promise.all([tableContext.close(), seat1Context.close(), seat2Context.close()]);
+  }
 });
 
 async function openCompanion(context: BrowserContext, player: number): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(`${origin}/play?gameid=WILD&player=${player}`);
-  await expect(page.getByRole('heading', { name: `Player ${player}` })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Your hand is empty' })).toBeVisible();
-  await expect(page.getByTestId('projection-revision')).toHaveText('Revision 1');
+  await page.goto(`${server.origin}/play?gameid=WILD&player=${player}`);
   return page;
+}
+
+function tableSurface(page: Page): Surface {
+  return {
+    id: 'table', name: 'Shared table', page,
+    verifications: [
+      { spec: 'Game code remains WILD', check: async () => expect(page.getByTestId('game-code')).toHaveText('WILD') },
+      { spec: 'Public projection remains at revision 1', check: async () => expect(page.getByTestId('projection-revision')).toHaveText('Revision 1') },
+      { spec: 'Both companion QR codes remain visible', check: async () => expect(page.locator('[data-testid$="-qr"] img')).toHaveCount(2) }
+    ]
+  };
+}
+
+function companionSurface(page: Page, player: number): Surface {
+  return {
+    id: `player-${player}`, name: `Player ${player} companion`, page,
+    verifications: [
+      { spec: `Device is assigned to player ${player}`, check: async () => expect(page.getByRole('heading', { name: `Player ${player}` })).toBeVisible() },
+      { spec: 'Private hand is empty', check: async () => expect(page.getByRole('heading', { name: 'Your hand is empty' })).toBeVisible() },
+      { spec: 'Private projection is at revision 1', check: async () => expect(page.getByTestId('projection-revision')).toHaveText('Revision 1') }
+    ]
+  };
+}
+
+async function verifyCanonicalAction() {
+  const response = await fetch(`${server.origin}/api/games/WILD/actions`);
+  expect(response.ok).toBe(true);
+  const actions = await response.json();
+  expect(actions).toHaveLength(1);
+  expect(actions[0]).toMatchObject({ type: 'GameConfigured', payload: { playerCount: 2 } });
 }
