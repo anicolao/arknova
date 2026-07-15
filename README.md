@@ -57,8 +57,9 @@ companions for secrecy and detail, not isolated copies of the whole game.
 See [DESIGN_OVERVIEW.md](./DESIGN_OVERVIEW.md) for the product architecture,
 [TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md) for the proposed
 implementation architecture, [E2E_GUIDE.md](./E2E_GUIDE.md) for the full-stack
-testing contract, and [RULES_SUMMARY.md](./RULES_SUMMARY.md) for the base-game
-rules reference.
+testing contract, [MVP_MILESTONES.md](./MVP_MILESTONES.md) for the vertical
+development roadmap, and [RULES_SUMMARY.md](./RULES_SUMMARY.md) for the
+base-game rules reference.
 
 ## Status
 
