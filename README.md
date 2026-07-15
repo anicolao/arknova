@@ -63,9 +63,10 @@ base-game rules reference.
 
 ## Status
 
-This repository is in the design and prototyping phase. The current code only
-contains Nix-based local asset-inspection utilities. No gameplay server or client
-has been selected or implemented yet.
+Increment 001 is implemented: the Go server can create and durably restore a
+two-player game, serve the SvelteKit table and companion clients, and display
+stable companion QR codes. The game currently stops at connected empty player
+areas; gameplay rules arrive in later tracer bullets.
 
 ## Development Environment
 
@@ -76,8 +77,23 @@ nix develop
 nix flake check
 ```
 
-Future application commands, tests, and local services should be exposed through
-the flake so a new development machine needs only Nix and this repository.
+Build and run the current application with:
+
+```console
+nix develop --command sh -c 'cd web && bun install --frozen-lockfile && bun run build'
+nix develop --command go run ./cmd/arknova \
+  -listen 0.0.0.0:8080 \
+  -data ./data \
+  -web ./web/build \
+  -public-url http://YOUR-SERVER-NAME:8080
+```
+
+Open `/table` at the configured server URL. Run all Go and browser checks with:
+
+```console
+nix develop --command go test ./...
+nix develop --command sh -c 'cd web && bun run check:precommit && bun run test:e2e'
+```
 
 ## Local Asset Inspection
 

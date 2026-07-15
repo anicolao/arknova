@@ -1,0 +1,26 @@
+{
+  "name": "arknova-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:precommit": "bun run check && bun run build",
+    "test:e2e:install": "playwright install chromium",
+    "test:e2e": "bun run build && mkdir -p .e2e && go build -o .e2e/arknova ../cmd/arknova && playwright test",
+    "test:e2e:update-snapshots": "bun run build && mkdir -p .e2e && go build -o .e2e/arknova ../cmd/arknova && playwright test --update-snapshots"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@sveltejs/adapter-static": "^3.0.8",
+    "@sveltejs/kit": "^2.37.0",
+    "@sveltejs/vite-plugin-svelte": "^6.1.0",
+    "@types/qrcode": "^1.5.5",
+    "qrcode": "^1.5.4",
+    "svelte": "^5.38.0",
+    "svelte-check": "^4.3.1",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}
