@@ -95,6 +95,9 @@ nix develop --command go test ./...
 nix develop --command sh -c 'cd web && bun run check:precommit && bun run test:e2e'
 ```
 
+All changes are pushed on focused branches and opened as draft pull requests for
+initial review. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
 ## Local Asset Inspection
 
 The installed official Steam game uses Unity Addressables. For local research,
