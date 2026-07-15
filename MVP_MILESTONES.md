@@ -34,7 +34,11 @@ properly licensed content. It must support:
 
 Extracted game media is not part of the deliverable. Development and CI use
 synthetic content. Production media is integrated only after licensing is
-resolved.
+resolved. Synthetic and licensed content packs are interchangeable: every
+corresponding asset must have the same relative path and filename, media type,
+and intrinsic dimensions. Application code and layouts must behave identically
+when the configured pack changes; they must not contain pack-specific paths or
+size overrides.
 
 ## Rules for Every Increment
 
@@ -52,6 +56,8 @@ An increment is complete only when all of the following are true:
 8. The increment works from a clean checkout through the Nix environment and CI.
 9. No disabled, speculative, or unreachable subsystem was added “for later.”
 10. Documentation describes the behavior that actually exists.
+11. Every added synthetic asset has the licensed-pack-relative path, filename,
+    media type, and intrinsic dimensions defined by the content contract.
 
 E2E tests prove the visible journey. They do not excuse missing reducer,
 determinism, projection, or persistence tests. Conversely, unit tests do not make

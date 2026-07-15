@@ -86,6 +86,16 @@ Go `internal` packages prevent accidental public API growth. Dependencies point
 inward: adapters may import the rules kernel; the rules kernel imports neither
 storage, networking, UI, clocks, filesystem, SQL, nor media packages.
 
+### Content-pack asset contract
+
+Synthetic and licensed content packs implement the same filesystem contract.
+For every corresponding resource, both packs must provide the same relative
+path and filename, media type, and intrinsic size (for example, identical pixel
+dimensions for raster images). Selecting a pack changes only the configured
+content root; URLs, manifests, application code, CSS, and tests must not rewrite
+paths or apply pack-specific dimensions. Missing or mismatched resources fail
+content-pack validation before a game starts.
+
 ## 3. Runtime Topology
 
 ```text

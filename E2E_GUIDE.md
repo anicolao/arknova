@@ -341,6 +341,13 @@ cards such as `Synthetic Ibex`, placeholder icons, geometric boards, and stable
 short text. Fixtures define enough rules to exercise the same engine pathways as
 real content without copying protected expression or media.
 
+Synthetic fixtures also implement the production content-pack asset contract.
+Each corresponding synthetic and licensed resource has the same relative path
+and filename, media type, and intrinsic dimensions. E2E tests switch packs only
+by changing the content root; pack-specific URL substitutions, filename maps,
+CSS dimensions, and screenshot masks are prohibited. CI validates the synthetic
+pack against the contract without requiring or accessing licensed media.
+
 Each scenario requests a fixture world containing:
 
 - content/rules/RNG versions;
