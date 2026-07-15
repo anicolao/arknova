@@ -37,7 +37,7 @@ a protocol compatibility guarantee.
 | Environment | Nix flake | Reproducible Go, Bun, Node, SQLite, and browser dependencies on nix-darwin and CI |
 
 This is a local-first distributed web application. A dedicated server device
-runs the Go process and owns storage, rules, authentication, and versioned static
+runs the Go process and owns storage, rules, game/player routing, and versioned static
 web assets. The large tabletop is a separate physical device running only the
 table client. Companions are additional network clients. All connect to the
 server over the local network; no cloud service is required to play.
@@ -56,7 +56,7 @@ internal/
   random/                         # versioned ancestry-keyed deterministic PRF
   eventlog/                       # JSONL append, locking, fsync, and replay cursor
   projections/                    # public/private read model builders
-  sessions/                       # seat pairing, credentials, and connection lifecycle
+  sessions/                       # game/player routing and connection lifecycle
   server/                         # HTTP/WebSocket adapters; no game rules
   archive/                        # portable game export/import
 
@@ -112,9 +112,8 @@ local optimistic presentation, but it must reconcile to the next server
 projection and cannot expose optimistic hidden information.
 
 In production the server binds to a configured LAN interface and port.
-Host-header validation, origin checks, TLS when configured, and role/seat-scoped
-credentials apply even on a trusted home network. Development may bind to
-loopback.
+Host-header validation, origin checks, and TLS when configured apply at the HTTP
+boundary. Development may bind to loopback.
 
 ### 3.1 Configured server URL and client bootstrap
 
@@ -146,8 +145,8 @@ unless an administrator explicitly changes the configuration and reconnects.
   gameplay pauses; companions do not advance the game without the shared table.
 - The disconnected table keeps its last public projection visibly marked stale
   and disables action submission. It must not simulate later state locally.
-- After table refresh, reboot, or Wi-Fi recovery, it authenticates again and
-  requests a fresh full projection before accepting input.
+- After table refresh, reboot, or Wi-Fi recovery, it opens the same configured
+  URL and requests a fresh full projection before accepting input.
 - If one companion disconnects, the table remains usable for public inspection;
   play pauses only when that seat owes a private decision.
 - If the server disconnects or restarts, every client enters a read-only
@@ -186,7 +185,7 @@ written. Rejected requests belong only in bounded operational logs.
 
 The server is the only normal writer. For every submitted action:
 
-1. Authenticate the session and seat.
+1. Read the game code and player number supplied by the client.
 2. Acquire the game's event-log lock.
 3. Compare `expectedRevision` with the current complete-line count maintained by
    the in-memory authoritative state.
@@ -309,9 +308,9 @@ Mutation endpoints express human intent:
 ```http
 POST /api/games/{gameId}/actions
 Content-Type: application/json
-Authorization: Bearer <seat credential>
 
 {
+  "player": 2,
   "type": "BuildRequested",
   "schemaVersion": 1,
   "expectedRevision": 83,
@@ -322,15 +321,16 @@ Authorization: Bearer <seat credential>
 
 Success returns the accepted revision and event ID, not a list of consequences.
 Conflicts return the current revision. Validation errors use stable machine codes
-plus safe user-facing messages and never expose hidden legal options.
+plus clear user-facing messages.
 
-Session and administrative actions have separate endpoints and explicit roles.
-All mutating requests require JSON, origin validation, and authentication.
+Session and administrative actions have separate endpoints. All mutating
+requests require JSON and must pass the normal game/player turn validation.
 
 ### 7.2 Projection stream
 
-After pairing, each client opens a WebSocket authorized for exactly one viewer.
-Messages contain:
+Each client opens a WebSocket using its `gameid` and `player` parameters. The
+server trusts those parameters and sends that viewer's projection. Messages
+contain:
 
 - game, branch, and revision;
 - projection schema version;
@@ -342,35 +342,30 @@ full projection. The protocol favors correctness over clever incremental state.
 Backpressure is bounded; a slow client is disconnected and reconnects from a
 fresh projection rather than accumulating unbounded updates.
 
-## 8. Pairing and Session Security
+## 8. Companion URLs and Recovery
 
-The table requests a short-lived pairing URL from the server and renders the
-complete URL as a QR code. It includes the configured HTTP or HTTPS origin, game
-ID, seat or seat-selection context, and a single-use nonce. For example:
+The table renders one stable companion URL per player as a QR code. Each URL
+contains the configured HTTP or HTTPS origin, game code, and player number. For
+example:
 
 ```text
-https://gameserver.example.home:8443/play/pair?game=GAME_ID&nonce=NONCE
+https://gameserver.example.home:8443/play?gameid=ABCD&player=2
 ```
 
 A companion scans the QR code and opens the server-hosted companion UI directly.
-There is no companion discovery step. After confirmation, the server issues a
-revocable seat credential directly to that companion. The table never proxies or
-learns the companion credential.
+There is no pairing exchange, nonce, account, credential, expiration, or
+revocation. The server uses `gameid` to locate the game and `player` to select the
+seat projection. It still validates that submitted actions are legal for the
+specified player in the current state.
 
-Requirements:
-
-- pairing codes expire and cannot be replayed;
-- a credential grants only one game and seat;
-- replacing a device visibly revokes the previous credential;
-- credentials are stored outside URLs and diagnostic output;
-- private projections are never cached by a shared service worker;
-- the admin UI requires a deliberate physical-table confirmation;
-- game archives containing hidden history are treated as private data.
+If a device is lost, refreshed, or replaced, the player scans the same QR code
+again. The URL may also be typed or bookmarked. This intentionally favors simple
+recovery over protection against players viewing another seat's URL.
 
 HTTPS deployments use a certificate trusted by the table and companions. HTTP
 is also supported when that is appropriate for the configured local network.
 The QR code always uses the same configured origin that served the table so
-companions connect to the intended server without discovery or origin rewriting.
+companions connect to the intended server without origin rewriting.
 
 ## 9. Web Client Architecture
 
@@ -382,7 +377,7 @@ Client state is divided into:
 - **server projection:** replaced or patched only by revisioned stream messages;
 - **ephemeral UI state:** inspection, zoom, hover, drag preview, and orientation;
 - **draft intent:** unsubmitted choices spanning table and companion;
-- **connection state:** pairing, revision, reconnect, and resync status.
+- **connection state:** game/player route, revision, reconnect, and resync status.
 
 Ephemeral inspection never becomes an event. A draft becomes one canonical input
 only after final confirmation. Cross-device drafts use a server-issued
@@ -422,9 +417,9 @@ On server startup it:
 Canonical appends are acknowledged only after the JSONL line is flushed and
 `fsync` succeeds. Projection failure after that is recoverable by replay and must
 not roll back or remove the accepted line.
-The table device is replaceable without restoring data: authorize a replacement,
-load the client from the server, and rebuild its entire view from a fresh
-projection.
+The table device is replaceable without restoring data: configure a replacement
+with the same server URL, load the client, and rebuild its entire view from a
+fresh projection.
 
 The CLI should eventually provide:
 
@@ -440,7 +435,7 @@ arknova export --game GAME_ID --output game.arknova
 
 Operational logs are structured and separate from gameplay history. Include
 request ID, game ID, branch, revision, duration, and safe error code. Exclude
-event payloads, credentials, private card IDs, and full projections by default.
+event payloads, private card IDs, and full projections by default.
 
 Useful metrics include append latency, replay duration, JSONL tail length,
 projection rebuild time, WebSocket reconnects, dropped updates, rejected stale
@@ -459,7 +454,7 @@ No one test layer is the source of truth for everything:
 - action-log tests prove locking, complete-line append, `fsync` error handling,
   cursor replay, idempotency, undo lineage, and recovery;
 - projection tests prove privacy and viewer-specific contracts;
-- API tests prove authentication and protocol behavior;
+- API tests prove game/player routing and protocol behavior;
 - Playwright E2E tests are the primary proof of user-visible behavior and visual
   state across the table and companion surfaces.
 
