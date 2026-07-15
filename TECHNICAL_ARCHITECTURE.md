@@ -36,9 +36,11 @@ a protocol compatibility guarantee.
 | E2E | Playwright Chromium | Multi-context testing, deterministic screenshots, mobile/table viewports |
 | Environment | Nix flake | Reproducible Go, Bun, Node, SQLite, and browser dependencies on nix-darwin and CI |
 
-This is a local-first web application. The tabletop computer runs one Go process
-that owns storage, rules, authentication, and static web assets. The table and
-companions connect through browsers. No cloud service is required to play.
+This is a local-first distributed web application. A dedicated server device
+runs the Go process and owns storage, rules, authentication, and versioned static
+web assets. The large tabletop is a separate physical device running only the
+table client. Companions are additional network clients. All connect to the
+server over the local network; no cloud service is required to play.
 
 ## 2. Repository Layout
 
@@ -87,32 +89,67 @@ storage, networking, UI, clocks, filesystem, SQL, nor media packages.
 ## 3. Runtime Topology
 
 ```text
-                           tabletop browser
-                         /table (public view)
-                                  |
-                                  | HTTPS/WSS on local LAN
-                                  v
-phone/tablet browsers ---> session server <--- admin browser
-  /play (seat-private)       |     |
-                             |     +--> projection cache/store
-                             |
-                             +--> append service --> canonical event store
-                                      |
-                                      v
-                              pure rules/replay kernel
-                                      |
-                                      v
-                              authoritative state
+┌──────────────────────────┐       HTTPS/WSS       ┌──────────────────────────┐
+│ Dedicated table device   │<--------------------->│ Dedicated server device  │
+│ /table public client     │       local LAN       │ Go session server        │
+│ no canonical storage     │                       │ canonical event store    │
+└──────────────────────────┘                       │ projection cache/store   │
+                                                  │ pure replay kernel       │
+┌──────────────────────────┐                       └──────────────────────────┘
+│ Companion devices        │                            ^              ^
+│ /play seat-private       │----------------------------+              |
+└──────────────────────────┘                                           |
+                                                                       |
+┌──────────────────────────┐                                           |
+│ Admin browser            │-------------------------------------------+
+└──────────────────────────┘
 ```
 
-One server process is authoritative for a game. Clients never run an
+One process on the server device is authoritative for a game. The table is not a
+fallback server and holds no canonical database. Clients never run an
 authoritative reducer and never append directly to storage. A client may use
 local optimistic presentation, but it must reconcile to the next server
 projection and cannot expose optimistic hidden information.
 
-The server binds to the LAN only when explicitly requested. Default development
-and solo use bind to loopback. Host-header validation, origin checks, and
-seat-scoped credentials apply even on a trusted home network.
+In production the server binds to an explicitly configured LAN interface and
+advertises its service on the local network. Development may bind to loopback.
+Host-header validation, origin checks, TLS, and role/seat-scoped credentials
+apply even on a trusted home network.
+
+### 3.1 Discovery and client bootstrap
+
+The server advertises a versioned service using mDNS/DNS-SD, for example
+`_arknova._tcp`. The table can also accept a manually entered server URL or scan
+an administrator bootstrap QR code. Discovery identifies candidates; it does not
+establish trust.
+
+On first connection, an administrator authorizes the table device and the server
+issues a revocable `table` role credential. The table then loads the exact web
+client build served by that server. Serving clients from the server keeps the UI,
+projection schema, content pack, and protocol versions aligned without
+coordinated application-store updates. A separately installed shell or PWA must
+still reload versioned assets from the selected server before joining a game.
+
+The table displays the connected server name, certificate identity, health, and
+projection revision in an administrator-accessible status area. It never silently
+switches to another discovered server during a session.
+
+### 3.2 Device and network failure semantics
+
+- If the table disconnects, the server remains authoritative and durable. Normal
+  gameplay pauses; companions do not advance the game without the shared table.
+- The disconnected table keeps its last public projection visibly marked stale
+  and disables action submission. It must not simulate later state locally.
+- After table refresh, reboot, or Wi-Fi recovery, it authenticates again and
+  requests a fresh full projection before accepting input.
+- If one companion disconnects, the table remains usable for public inspection;
+  play pauses only when that seat owes a private decision.
+- If the server disconnects or restarts, every client enters a read-only
+  reconnecting state. No client elects itself server and no offline actions are
+  queued for later append.
+- Server recovery replays the canonical store and publishes a fresh projection.
+  Clients discard obsolete drafts whose expected revision or branch no longer
+  matches.
 
 ## 4. Canonical Action Store
 
@@ -315,9 +352,12 @@ fresh projection rather than accumulating unbounded updates.
 
 ## 8. Pairing and Session Security
 
-The table displays a short-lived QR code containing the server origin and a
-single-use pairing nonce. A player chooses or is assigned a seat on the public
-table, confirms on the companion, and receives a revocable seat credential.
+The authorized table requests a short-lived pairing nonce from the separate
+server and displays a QR code containing the server origin, certificate
+fingerprint, game ID, and nonce. A player chooses or is assigned a seat on the
+public table, confirms on the companion, and receives a revocable seat
+credential directly from the server. The table never proxies or learns the
+companion credential.
 
 Requirements:
 
@@ -329,8 +369,10 @@ Requirements:
 - the admin UI requires a deliberate physical-table confirmation;
 - game archives containing hidden history are treated as private data.
 
-TLS on the local network should use a stable locally trusted certificate or a
-documented pairing trust flow. Development may use loopback HTTP only.
+TLS on the local network uses a stable server identity with a documented trust
+bootstrap. The administrator bootstrap and player pairing screens show a short
+certificate fingerprint so a discovered device cannot impersonate the game
+server. Development may use loopback HTTP only.
 
 ## 9. Web Client Architecture
 
@@ -356,9 +398,9 @@ payloads never depend on pixels, viewport size, or seat rotation.
 Use accessible native controls where possible, stable roles/names for broad
 interaction, and `data-testid` only for precise game state or geometry targets.
 
-## 10. Local Operation and Recovery
+## 10. Server Appliance Operation and Recovery
 
-The server owns a single data directory:
+The dedicated server device owns a single data directory:
 
 ```text
 data/
@@ -369,16 +411,20 @@ data/
   archives/
 ```
 
-On startup it:
+On server startup it:
 
 1. checks canonical database integrity and hash chains;
 2. verifies required versioned content is present;
 3. validates or discards snapshots;
 4. verifies the projection head and rebuilds if necessary;
-5. resumes serving only after a consistent state is available.
+5. starts LAN discovery and resumes serving only after a consistent state is
+   available.
 
 Canonical appends are acknowledged only after durable commit. Projection failure
 after commit is recoverable by replay and must not roll back accepted history.
+The table device is replaceable without restoring data: authorize a replacement,
+load the client from the server, and rebuild its entire view from a fresh
+projection.
 
 The CLI should eventually provide:
 

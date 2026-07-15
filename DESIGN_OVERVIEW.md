@@ -361,9 +361,10 @@ Animations are presentation only. Skipping or replaying one cannot affect rules.
 
 ## 8. Networking, Reconnects, and Persistence
 
-The host machine runs the authoritative server and durable event store. Clients
-communicate using request/response for action submission and a revisioned stream
-for projection updates.
+The authoritative server and durable event store run on a dedicated device that
+is physically separate from the tabletop display. The table and companions are
+network clients. They communicate with the server using request/response for
+action submission and a revisioned stream for projection updates.
 
 On reconnect, a client presents its seat credential and last seen revision. The
 server sends either projection deltas or a fresh projection. A client never needs
