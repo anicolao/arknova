@@ -56,14 +56,14 @@ Events that must **not** appear include `MoneyChanged`, `AppealAdvanced`,
 
 ### 2.2 Accepted actions only
 
-Malformed, unauthorized, stale, or illegal requests are rejected and are not
+Malformed, stale, or illegal requests are rejected and are not
 part of the game log. They may appear in operational logs or metrics, which are
 separate from the canonical game history.
 
 The append flow is:
 
 1. Load or replay state at the current revision.
-2. Authenticate the actor and verify seat ownership.
+2. Read the game code and player number from the client request.
 3. Check `expectedRevision` and `clientActionId`.
 4. Validate the proposed action against current legal choices.
 5. Append one complete JSON line to the game's action file and `fsync` it.
@@ -276,12 +276,13 @@ context. They can say “Player 2 drew two cards” without identifying those ca
 A player's own history may show the identities. Previously hidden information
 may become public when the rules reveal it.
 
-### 5.3 Transport security
+### 5.3 Companion URLs
 
-Personal devices pair to a seat using a short-lived QR code or numeric code shown
-on the table. The server issues a seat-scoped credential. Local TLS is desirable;
-at minimum, session tokens must be unguessable, revocable, and never embedded in
-URLs or logs.
+Each personal device opens a stable URL containing the game code and player
+number, for example `/play?gameid=ABCD&player=2`. The table displays these URLs
+as QR codes. The server trusts the parameters and returns the corresponding seat
+projection; this local social game does not attempt to prevent a player from
+manually changing the URL to inspect another seat.
 
 The tabletop's public role does not grant access to private projections. An
 explicit administrator mode must be visibly entered for recovery or debugging.
@@ -311,7 +312,7 @@ Suggested modules:
 - **rules:** event schemas, validators, reducer, effects, scoring, and legal moves;
 - **event-log:** JSONL locking, complete-line append, `fsync`, stream reads, and
   projection byte-offset cursors;
-- **session-server:** authentication, seat pairing, commands, and subscriptions;
+- **session-server:** game/player routing, commands, and subscriptions;
 - **projections:** public/private DTOs and redacted history;
 - **table-client:** multi-touch public interface and seat-relative presentation;
 - **companion-client:** private hand, prompts, inspection, and confirmation;
@@ -368,9 +369,9 @@ that is physically separate from the tabletop display. The table and companions
 are network clients. They communicate with the server using request/response for
 action submission and a revisioned stream for projection updates.
 
-On reconnect, a client presents its seat credential and last seen revision. The
-server sends either projection deltas or a fresh projection. A client never needs
-the canonical log to recover.
+On reconnect, a client opens the same game/player URL and reports its last seen
+revision. The server sends either projection deltas or a fresh projection. A
+client never needs the canonical log to recover.
 
 Every accepted action is durably appended before success is returned. The action
 log layer should support:

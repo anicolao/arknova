@@ -38,7 +38,7 @@ waits, static enforcement, and CI parity.
 
 E2E scenarios cover complete player journeys and device coordination:
 
-- creating a game and pairing companions;
+- creating a game and opening companion URLs;
 - selecting private cards on a phone and public targets on the table;
 - submitting and confirming actions;
 - seeing seat-specific prompts without leaking them to other devices;
@@ -61,10 +61,10 @@ web/tests/e2e/
   helpers/
     fixtures.ts
     multi-surface-step-helper.ts
-    pairing.ts
+    companion-urls.ts
     privacy.ts
-  001-create-and-pair/
-    001-create-and-pair.spec.ts
+  001-create-and-connect/
+    001-create-and-connect.spec.ts
     README.md
     screenshots/
       000-game-created--table.png
@@ -127,7 +127,7 @@ or reset controls unless `ARKNOVA_E2E=1` and explicit test controls are enabled.
 CI must never connect to a developer's existing game directory.
 
 The harness must exercise configured-URL loading, host/origin checks, WebSocket
-authentication, QR pairing URLs, and disconnect behavior. A separate targeted
+game/player routing, QR companion URLs, and disconnect behavior. A separate targeted
 integration test may bind the server to another network interface, but canonical
 visual baselines continue to use the pinned loopback name and port.
 
@@ -144,8 +144,9 @@ One Playwright test creates multiple browser contexts:
   tablet viewports;
 - optional `admin`: isolated recovery context.
 
-Contexts must not share cookies, local storage, caches, or credentials. A private
-projection leak can be hidden if multiple seats use pages in one context.
+Contexts do not share cookies, local storage, or caches because they represent
+separate physical devices. A projection leak can be hidden if multiple seats use
+pages in one context, even though seat selection itself is not secured.
 
 Initial canonical projects:
 
@@ -367,8 +368,8 @@ Every cross-seat scenario includes negative assertions. At minimum:
 - public WebSocket frames do not contain private fixture markers;
 - console messages and error responses do not reveal private payloads;
 - screenshots, traces, generated READMEs, and HTML reports are safe to retain;
-- reconnecting with a different seat credential changes the available projection;
-- revoked credentials stop receiving updates.
+- changing the `player` URL parameter changes the available projection;
+- rescanning the same QR URL restores the same seat after a device reset.
 
 Use unique canary strings in each seat's hidden fixture data and scan serialized
 network responses and artifacts for those strings. Prefer an allow-list of the
@@ -423,12 +424,14 @@ screen pixels.
 
 ## 14. Initial Scenarios
 
-### 001 Create and pair
+### 001 Create and connect
 
 - Create a deterministic two-player game on the table.
-- Pair two isolated companions using single-use codes.
+- Display stable `gameid`/`player` QR URLs for both seats.
+- Open those URLs in two isolated companion contexts.
 - Verify seat identity and public/private projections.
-- Verify a used or expired pairing code is rejected safely.
+- Reload and rescan a URL and verify it returns to the same seat without a
+  recovery ceremony.
 
 ### 002 Private card, public target
 
@@ -442,7 +445,7 @@ screen pixels.
 
 - Complete several actions.
 - Disconnect and recreate one companion context.
-- Re-pair or restore its seat credential and verify the exact private revision.
+- Reopen its `gameid`/`player` URL and verify the exact private revision.
 - Disconnect or restart the table client while the separate server remains
   running and verify the game remains durable.
 - Restart the server without changing the temporary JSONL action log.
