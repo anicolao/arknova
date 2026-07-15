@@ -88,6 +88,10 @@ nix develop --command go run ./cmd/arknova \
   -public-url http://YOUR-SERVER-NAME:8080
 ```
 
+For iterative testing on a physical table and phones, use the automatically
+reloading Vite and Go environment documented in
+[MANUAL_TESTING.md](./MANUAL_TESTING.md).
+
 Open `/table` at the configured server URL. Run all Go and browser checks with:
 
 ```console
