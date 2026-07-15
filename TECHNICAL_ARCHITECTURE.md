@@ -111,28 +111,34 @@ authoritative reducer and never append directly to storage. A client may use
 local optimistic presentation, but it must reconcile to the next server
 projection and cannot expose optimistic hidden information.
 
-In production the server binds to an explicitly configured LAN interface and
-advertises its service on the local network. Development may bind to loopback.
-Host-header validation, origin checks, TLS, and role/seat-scoped credentials
-apply even on a trusted home network.
+In production the server binds to a configured LAN interface and port.
+Host-header validation, origin checks, TLS when configured, and role/seat-scoped
+credentials apply even on a trusted home network. Development may bind to
+loopback.
 
-### 3.1 Discovery and client bootstrap
+### 3.1 Configured server URL and client bootstrap
 
-The server advertises a versioned service using mDNS/DNS-SD, for example
-`_arknova._tcp`. The table can also accept a manually entered server URL or scan
-an administrator bootstrap QR code. Discovery identifies candidates; it does not
-establish trust.
+The table is configured with the server device's stable hostname or IP address,
+port, and scheme. For example:
 
-On first connection, an administrator authorizes the table device and the server
-issues a revocable `table` role credential. The table then loads the exact web
-client build served by that server. Serving clients from the server keeps the UI,
-projection schema, content pack, and protocol versions aligned without
-coordinated application-store updates. A separately installed shell or PWA must
-still reload versioned assets from the selected server before joining a game.
+```text
+http://arknova-server:8080/table
+https://gameserver.example.home:8443/table
+```
 
-The table displays the connected server name, certificate identity, health, and
-projection revision in an administrator-accessible status area. It never silently
-switches to another discovered server during a session.
+The table opens that URL directly. There is no service discovery, candidate
+selection, or administrator discovery handshake. If the configured server is
+unreachable, the table shows a connection/configuration error and allows an
+administrator to correct the name, port, or scheme.
+
+The Go server serves the exact table and companion web-client build used with
+its protocol, projection schema, and content pack. The table therefore needs
+only a browser or kiosk shell and a configured server URL; it does not require a
+separately coordinated application release.
+
+The table displays the configured server URL, health, and projection revision in
+an administrator-accessible status area. It never changes server during a game
+unless an administrator explicitly changes the configuration and reconnects.
 
 ### 3.2 Device and network failure semantics
 
@@ -352,12 +358,18 @@ fresh projection rather than accumulating unbounded updates.
 
 ## 8. Pairing and Session Security
 
-The authorized table requests a short-lived pairing nonce from the separate
-server and displays a QR code containing the server origin, certificate
-fingerprint, game ID, and nonce. A player chooses or is assigned a seat on the
-public table, confirms on the companion, and receives a revocable seat
-credential directly from the server. The table never proxies or learns the
-companion credential.
+The table requests a short-lived pairing URL from the server and renders the
+complete URL as a QR code. It includes the configured HTTP or HTTPS origin, game
+ID, seat or seat-selection context, and a single-use nonce. For example:
+
+```text
+https://gameserver.example.home:8443/play/pair?game=GAME_ID&nonce=NONCE
+```
+
+A companion scans the QR code and opens the server-hosted companion UI directly.
+There is no companion discovery step. After confirmation, the server issues a
+revocable seat credential directly to that companion. The table never proxies or
+learns the companion credential.
 
 Requirements:
 
@@ -369,10 +381,10 @@ Requirements:
 - the admin UI requires a deliberate physical-table confirmation;
 - game archives containing hidden history are treated as private data.
 
-TLS on the local network uses a stable server identity with a documented trust
-bootstrap. The administrator bootstrap and player pairing screens show a short
-certificate fingerprint so a discovered device cannot impersonate the game
-server. Development may use loopback HTTP only.
+HTTPS deployments use a certificate trusted by the table and companions. HTTP
+is also supported when that is appropriate for the configured local network.
+The QR code always uses the same configured origin that served the table so
+companions connect to the intended server without discovery or origin rewriting.
 
 ## 9. Web Client Architecture
 
@@ -417,8 +429,8 @@ On server startup it:
 2. verifies required versioned content is present;
 3. validates or discards snapshots;
 4. verifies the projection head and rebuilds if necessary;
-5. starts LAN discovery and resumes serving only after a consistent state is
-   available.
+5. begins serving the configured HTTP/HTTPS name and port only after a consistent
+   state is available.
 
 Canonical appends are acknowledged only after durable commit. Projection failure
 after commit is recoverable by replay and must not roll back accepted history.
