@@ -49,7 +49,8 @@ companions for secrecy and detail, not isolated copies of the whole game.
 - **Explainability:** Any visible value can be traced to prior player actions and
   rule applications.
 - **Local-first sessions:** A game should survive device refreshes, temporary
-  Wi-Fi loss, and restarting the tabletop computer.
+  Wi-Fi loss, restarting the tabletop display, and reconnecting to the separate
+  game server.
 - **Versioned games:** Saved sessions remain replayable after software and card
   data evolve.
 

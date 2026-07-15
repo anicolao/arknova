@@ -92,12 +92,17 @@ many steps when they form one indivisible cross-device journey.
 
 ## 4. Full-Stack Test Harness
 
-`web/scripts/test-server.ts` owns the complete lifecycle for one Playwright run:
+`web/scripts/test-server.ts` owns the complete lifecycle for one Playwright run.
+It runs the server and web tooling as separate processes with distinct origins,
+emulating the physical server/table network boundary even though CI hosts both
+processes on one runner:
 
 1. Create a temporary root outside the repository.
 2. Write a tiny synthetic content pack with stable IDs and placeholder media.
 3. Start the real Go server with an empty canonical store.
-4. Start Vite on a strict loopback port and proxy `/api` and WebSockets.
+4. Start Vite on a different strict loopback port, configured to connect to the
+   server origin exactly as the physical table would. Do not hide the boundary
+   behind a same-origin API proxy in full-stack tests.
 5. Wait for explicit health and replay-ready endpoints.
 6. Forward child output with component prefixes.
 7. Terminate all children and delete the temporary root on exit.
@@ -121,6 +126,11 @@ ARKNOVA_UI_BUILD_HASH=e2e-build
 The production binary must refuse deterministic-ID, fixed-clock, fixture-content,
 or reset controls unless `ARKNOVA_E2E=1` and explicit test controls are enabled.
 CI must never connect to a developer's existing game directory.
+
+The harness must exercise CORS/origin checks, WebSocket authentication, and
+disconnect behavior across the two origins. A separate targeted CI job may bind
+the server to an isolated network interface or container network, but canonical
+visual baselines continue to use the pinned local runner.
 
 Initially, run scenarios serially with one worker. Parallelism is allowed only
 after the harness provides a completely isolated server, ports, data directory,
@@ -435,8 +445,11 @@ screen pixels.
 - Complete several actions.
 - Disconnect and recreate one companion context.
 - Re-pair or restore its seat credential and verify the exact private revision.
+- Disconnect or restart the table client while the separate server remains
+  running and verify the game remains durable.
 - Restart the server without changing the temporary canonical store.
 - Verify table and companions reconstruct identical projections.
+- Verify no client accepts actions while the server is unavailable.
 
 ### 004 Undo hidden information
 
