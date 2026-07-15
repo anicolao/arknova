@@ -60,15 +60,16 @@ Malformed, unauthorized, stale, or illegal requests are rejected and are not
 part of the game log. They may appear in operational logs or metrics, which are
 separate from the canonical game history.
 
-The append transaction is:
+The append flow is:
 
 1. Load or replay state at the current revision.
 2. Authenticate the actor and verify seat ownership.
 3. Check `expectedRevision` and `clientActionId`.
 4. Validate the proposed action against current legal choices.
-5. Append the input event atomically.
-6. Replay or incrementally reduce it into a new state.
-7. Publish new projections to connected devices.
+5. Append one complete JSON line to the game's action file and `fsync` it.
+6. Replay or incrementally reduce it into the SQLite projection.
+7. Advance the projection byte-offset cursor in the projection transaction.
+8. Publish new projections to connected devices.
 
 `clientActionId` makes retries idempotent. `expectedRevision` prevents two
 devices from silently acting on different states.
@@ -204,8 +205,9 @@ The reducer returns a new immutable state for each accepted input. State include
 - break and end-game progress;
 - deterministic RNG cursor/state.
 
-Snapshots may cache this computed state for performance. They are disposable,
-versioned artifacts—not canonical records—and can always be rebuilt from the log.
+The SQLite projection may cache this computed state for performance. It is a
+disposable, versioned artifact—not a canonical record—and can always be rebuilt
+from the JSONL action log.
 
 ### 4.2 Command validation
 
@@ -281,17 +283,16 @@ on the table. The server issues a seat-scoped credential. Local TLS is desirable
 at minimum, session tokens must be unguessable, revocable, and never embedded in
 URLs or logs.
 
-The tabletop has no privileged access to private projections merely because it
-runs on the host computer. An explicit administrator mode must be visibly entered
-for recovery or debugging.
+The tabletop's public role does not grant access to private projections. An
+explicit administrator mode must be visibly entered for recovery or debugging.
 
 ## 6. System Boundaries
 
 ```text
                   immutable accepted input
-Table UI  ─┐       events                 ┌─ Event Store
+Table UI  ─┐       actions                ┌─ JSONL Action Log
            ├─> Session API -> Validator ──┤
-Phone UIs ─┘                              └─ Snapshot Cache
+Phone UIs ─┘                              └─ SQLite Projection
                           │
                           v
                  Deterministic Reducer
@@ -308,7 +309,8 @@ Suggested modules:
 
 - **content:** versioned cards, maps, icons, localization keys, and media IDs;
 - **rules:** event schemas, validators, reducer, effects, scoring, and legal moves;
-- **event-store:** atomic append, stream reads, integrity hashes, and snapshots;
+- **event-log:** JSONL locking, complete-line append, `fsync`, stream reads, and
+  projection byte-offset cursors;
 - **session-server:** authentication, seat pairing, commands, and subscriptions;
 - **projections:** public/private DTOs and redacted history;
 - **table-client:** multi-touch public interface and seat-relative presentation;
@@ -361,25 +363,25 @@ Animations are presentation only. Skipping or replaying one cannot affect rules.
 
 ## 8. Networking, Reconnects, and Persistence
 
-The authoritative server and durable event store run on a dedicated device that
-is physically separate from the tabletop display. The table and companions are
-network clients. They communicate with the server using request/response for
+The authoritative server and durable JSONL action log run on a dedicated device
+that is physically separate from the tabletop display. The table and companions
+are network clients. They communicate with the server using request/response for
 action submission and a revisioned stream for projection updates.
 
 On reconnect, a client presents its seat credential and last seen revision. The
 server sends either projection deltas or a fresh projection. A client never needs
 the canonical log to recover.
 
-Every accepted event is durably committed before success is returned. The event
-store should support:
+Every accepted action is durably appended before success is returned. The action
+log layer should support:
 
-- append with expected revision;
-- unique event and client-action IDs;
-- per-entry schema version;
-- integrity hashing or hash chaining;
-- periodic disposable snapshots;
+- serialized append with expected revision;
+- unique action and client-action IDs;
+- one complete JSON object per line with a schema version;
+- `fsync` before acknowledging an accepted action;
+- replay from a SQLite projection's byte-offset cursor;
 - export/import of a complete versioned game archive;
-- explicit branching for development and replay tools.
+- logical undo lineages interpreted by the reducer without rewriting the file.
 
 Loss of a companion must not corrupt a session. A seat can be re-paired from the
 table through a visible administrative action.
@@ -454,7 +456,8 @@ from normal sessions.
 ## 11. Open Decisions
 
 - Implementation language for the deterministic rules kernel.
-- Durable event-store format and game archive format.
+- Portable game archive format around the canonical JSONL action file and pinned
+  content versions.
 - Web versus native shell for the tabletop and companions.
 - Exact confirmation policy for table-originated actions.
 - Commit/reveal recovery policy and whether casual play needs it.

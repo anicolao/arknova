@@ -27,8 +27,8 @@ a protocol compatibility guarantee.
 | Area | Choice | Rationale |
 | --- | --- | --- |
 | Rules and server | Go | Explicit data flow, good concurrency and networking, fast deterministic tests, simple local deployment |
-| Canonical store | SQLite in WAL mode | Atomic expected-revision appends, durable local operation, branch queries, straightforward backup |
-| Projection store | Separate disposable SQLite database | Fast reads without making projections authoritative |
+| Canonical store | One append-only JSONL file per game | Human-readable actions, simple backup, and deterministic replay |
+| Projection store | Disposable SQLite database | Fast reads and idempotency indexes without making projections authoritative |
 | Web clients | SvelteKit, Svelte 5, TypeScript | Shared with the sibling apps; strong touch-oriented component model and Playwright support |
 | Package manager | Bun with a committed lockfile | Fast, deterministic frontend scripts and test orchestration |
 | Client transport | HTTP commands plus WebSocket projection stream | Clear mutation boundary and efficient revisioned updates |
@@ -54,7 +54,7 @@ internal/
   events/                         # input-event schemas and version upgrades
   rules/                          # pure validation, reduction, effects, legal moves
   random/                         # versioned ancestry-keyed deterministic PRF
-  eventstore/                     # append-only SQLite log and branch metadata
+  eventlog/                       # JSONL append, locking, fsync, and replay cursor
   projections/                    # public/private read model builders
   sessions/                       # seat pairing, credentials, and connection lifecycle
   server/                         # HTTP/WebSocket adapters; no game rules
@@ -92,7 +92,7 @@ storage, networking, UI, clocks, filesystem, SQL, nor media packages.
 ┌──────────────────────────┐       HTTPS/WSS       ┌──────────────────────────┐
 │ Dedicated table device   │<--------------------->│ Dedicated server device  │
 │ /table public client     │       local LAN       │ Go session server        │
-│ no canonical storage     │                       │ canonical event store    │
+│ no canonical storage     │                       │ actions.jsonl            │
 └──────────────────────────┘                       │ projection cache/store   │
                                                   │ pure replay kernel       │
 ┌──────────────────────────┐                       └──────────────────────────┘
@@ -153,90 +153,80 @@ unless an administrator explicitly changes the configuration and reconnects.
 - If the server disconnects or restarts, every client enters a read-only
   reconnecting state. No client elects itself server and no offline actions are
   queued for later append.
-- Server recovery replays the canonical store and publishes a fresh projection.
+- Server recovery replays the canonical action file and publishes a fresh projection.
   Clients discard obsolete drafts whose expected revision or branch no longer
   matches.
 
-## 4. Canonical Action Store
+## 4. Canonical Action Log
 
-### 4.1 Storage model
+### 4.1 File format
 
-The canonical SQLite database contains append-only input and lineage metadata:
+Each game has one canonical file:
 
-```sql
-create table games (
-  game_id text primary key,
-  created_at_ms integer not null,
-  active_branch_id text not null
-);
-
-create table branches (
-  branch_id text primary key,
-  game_id text not null,
-  parent_branch_id text,
-  parent_revision integer,
-  branch_commitment blob not null,
-  created_at_ms integer not null
-);
-
-create table input_events (
-  branch_id text not null,
-  revision integer not null,
-  event_id text not null unique,
-  client_action_id text not null,
-  actor_kind text not null,
-  actor_id text not null,
-  event_type text not null,
-  schema_version integer not null,
-  payload_json blob not null,
-  recorded_at_ms integer not null,
-  previous_hash blob not null,
-  event_hash blob not null,
-  primary key (branch_id, revision),
-  unique (branch_id, actor_id, client_action_id)
-);
+```text
+games/GAME_ID/actions.jsonl
 ```
 
-The exact schema may evolve, but these invariants do not:
+Every complete line is one accepted human action encoded as a JSON object:
 
-- a branch revision is contiguous and unique;
-- rows are never updated or deleted during normal operation;
-- `client_action_id` makes retries idempotent;
-- every row commits to its predecessor through a hash chain;
-- actor identity and event schema version are explicit;
-- timestamps are audit metadata and never rules inputs.
+```json
+{"actionId":"01J...","clientActionId":"table-7:193","actor":{"kind":"player","seat":2},"type":"BuildRequested","schemaVersion":1,"recordedAtMs":1710504000000,"payload":{"actionCardInstanceId":"action-build-p2","xTokensSpent":1,"placements":[{"building":"standard-enclosure-3","anchor":"F7","rotation":2}]}}
+```
 
-Database permissions and triggers should reject updates and deletes outside an
-explicit archive-maintenance tool. Backups copy the canonical database plus the
-pinned content packs required to replay it.
-
-### 4.2 Append transaction
-
-For every submitted action:
-
-1. Authenticate the session and seat.
-2. Begin an immediate SQLite transaction.
-3. Read the branch head and compare `expectedRevision`.
-4. Return the existing result for a repeated `clientActionId`.
-5. Load a verified snapshot or replay to the branch head.
-6. Decode and validate the input against current state.
-7. Append the input row and updated hash-chain head.
-8. Commit before acknowledging success.
-9. Reduce and publish projections for the new revision.
+The file contains no SQL schema, projection rows, snapshots, computed outcomes,
+or special storage records. `recordedAtMs` is audit metadata and never a rules
+input. File order is action order; the zero-based line number is the action
+revision. The action ID and client action ID are part of the envelope so reducers
+and the disposable projection can detect duplicates.
 
 No `MoneyChanged`, `CardDrawn`, `TurnAdvanced`, or other computed consequence is
 written. Rejected requests belong only in bounded operational logs.
 
-### 4.3 Branches and undo
+### 4.2 Append and projection flow
 
-An accepted undo creates lineage metadata rather than truncating history. The
-new branch references the agreed parent revision and commits to the original
-lineage's `UndoProposed` and acceptance actions. Its commitment participates in
-all later random derivation.
+The server is the only normal writer. For every submitted action:
 
-Post-rewind actions are not copied. Players play forward from the reconstructed
-state, and hidden information after the branch point is newly and
-deterministically selected for that branch.
+1. Authenticate the session and seat.
+2. Acquire the game's event-log lock.
+3. Compare `expectedRevision` with the current complete-line count maintained by
+   the in-memory authoritative state.
+4. Return the existing accepted result when `clientActionId` is already present
+   in the projection's idempotency index.
+5. Validate the proposed input against current state.
+6. Serialize one compact JSON object followed by one newline.
+7. Append the complete line to `actions.jsonl` and `fsync` the file.
+8. Apply that action through the reducer inside a SQLite projection transaction.
+9. Advance the projection's `next_offset` cursor to the new JSONL EOF in the same
+   SQLite transaction.
+10. Release the lock, acknowledge the accepted action, and publish projections.
+
+The SQLite database stores a `projection_state` row containing the next byte
+offset to reduce. On startup, the server seeks to that offset and applies every
+complete remaining line. Crash behavior is intentionally simple:
+
+- before the append: the action is absent and the client may retry;
+- after append but before projection commit: the durable line is replayed;
+- after projection commit: both the derived state and cursor already include it.
+
+A trailing partial line indicates interrupted or corrupted storage and stops
+startup for explicit recovery; it is never guessed or silently accepted. The
+JSONL file may be copied for backup once appends are paused or while holding the
+same lock. The projection database is excluded from backups because it is fully
+rebuildable.
+
+### 4.3 Undo in one linear file
+
+Undo does not truncate or rewrite `actions.jsonl`. `UndoProposed` and each
+player's acceptance are ordinary human-action lines. When the final required
+acceptance is reduced, the reducer reconstructs the state at the agreed earlier
+revision and begins a new logical lineage. Actions between that revision and the
+accepted undo remain in the file for audit but are no longer part of current
+game state.
+
+Subsequent actions append to the same file. The new lineage's deterministic
+random key includes the undo proposal and acceptance actions, so hidden
+information after the rewind changes while replay of the complete JSONL remains
+stable. No branch table, branch file, or mutable active-branch pointer is needed.
 
 ## 5. Pure Rules Kernel
 
@@ -305,14 +295,10 @@ Never serialize authoritative state and redact fields afterward. Tests recursive
 scan public payloads, logs, errors, traces, and Playwright artifacts for private
 fixture card IDs.
 
-Projection rows in the disposable SQLite database are caches. Each row records
-its branch, revision, projection schema version, and viewer class. The server may
-rebuild the entire database from the canonical log. Startup verifies the cached
-head and rebuilds on mismatch.
-
-Snapshots of authoritative state are also disposable. A snapshot records its
-state schema, branch, revision, and source event hash. It is accepted only after
-that hash matches the canonical chain.
+Projection rows in the disposable SQLite database are caches. The database also
+records its projection schema version along with a `next_offset` cursor pointing
+into `actions.jsonl`. The server may delete and rebuild the entire database by
+reducing the file from byte offset zero.
 
 ## 7. API and Realtime Protocol
 
@@ -416,24 +402,26 @@ The dedicated server device owns a single data directory:
 
 ```text
 data/
-  canonical.sqlite
+  games/
+    GAME_ID/
+      actions.jsonl
   projections.sqlite
-  snapshots/
   content/
   archives/
 ```
 
 On server startup it:
 
-1. checks canonical database integrity and hash chains;
+1. verifies every canonical JSONL file through its last complete line;
 2. verifies required versioned content is present;
-3. validates or discards snapshots;
-4. verifies the projection head and rebuilds if necessary;
+3. checks each projection cursor against its JSONL file size;
+4. reduces any unapplied tail or rebuilds SQLite from offset zero if necessary;
 5. begins serving the configured HTTP/HTTPS name and port only after a consistent
    state is available.
 
-Canonical appends are acknowledged only after durable commit. Projection failure
-after commit is recoverable by replay and must not roll back accepted history.
+Canonical appends are acknowledged only after the JSONL line is flushed and
+`fsync` succeeds. Projection failure after that is recoverable by replay and must
+not roll back or remove the accepted line.
 The table device is replaceable without restoring data: authorize a replacement,
 load the client from the server, and rebuild its entire view from a fresh
 projection.
@@ -454,9 +442,9 @@ Operational logs are structured and separate from gameplay history. Include
 request ID, game ID, branch, revision, duration, and safe error code. Exclude
 event payloads, credentials, private card IDs, and full projections by default.
 
-Useful metrics include append latency, replay duration, snapshot hits, projection
-rebuild time, WebSocket reconnects, dropped updates, rejected stale revisions,
-and active sessions. Metrics never influence rules.
+Useful metrics include append latency, replay duration, JSONL tail length,
+projection rebuild time, WebSocket reconnects, dropped updates, rejected stale
+revisions, and active sessions. Metrics never influence rules.
 
 Every accepted action can produce an ephemeral explanation trace from the pure
 kernel. Traces are available in local diagnostics and the player-facing action
@@ -468,7 +456,8 @@ No one test layer is the source of truth for everything:
 
 - pure unit and property tests prove rules and invariants;
 - golden replay tests prove deterministic compatibility;
-- event-store tests prove atomicity, idempotency, branching, and recovery;
+- action-log tests prove locking, complete-line append, `fsync` error handling,
+  cursor replay, idempotency, undo lineage, and recovery;
 - projection tests prove privacy and viewer-specific contracts;
 - API tests prove authentication and protocol behavior;
 - Playwright E2E tests are the primary proof of user-visible behavior and visual
@@ -503,7 +492,7 @@ These rules should be enforced by package boundaries, static checks, and tests:
 2. Rules code performs no I/O and reads no ambient time or randomness.
 3. Every rules decision has a canonical collection order.
 4. Public/private wire DTOs are allow-listed and tested for leaks.
-5. Projection and snapshot deletion cannot lose canonical gameplay.
+5. Deleting the projection database cannot lose canonical gameplay.
 6. Clients cannot calculate or submit computed consequences.
 7. Event appends use expected revision and idempotency keys.
 8. Every saved game pins all replay-relevant versions.
