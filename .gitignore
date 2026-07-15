@@ -3,6 +3,7 @@
 /prototype-assets/
 /tts-assets/
 /data/
+/.dev/
 /web/.e2e/
 /web/.svelte-kit/
 /web/build/
