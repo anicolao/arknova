@@ -4,10 +4,10 @@
 
 Playwright E2E scenarios are the primary proof that players can use the digital
 tabletop correctly across its shared and private surfaces. They exercise the
-real Go server, canonical event store, replay engine, projections, WebSocket
+real Go server, canonical JSONL action log, replay engine, projections, WebSocket
 updates, SvelteKit clients, and persistence boundary.
 
-E2E tests do not replace rules-kernel, replay, event-store, or privacy unit tests.
+E2E tests do not replace rules-kernel, replay, action-log, or privacy unit tests.
 They prove the user-visible contract: a player's action can travel through the
 whole system and produce the correct public and private experiences.
 
@@ -100,7 +100,7 @@ server's configured HTTP origin:
 1. Create a temporary root outside the repository.
 2. Write a tiny synthetic content pack with stable IDs and placeholder media.
 3. Build the SvelteKit static client with the pinned frontend toolchain.
-4. Start the real Go server with an empty canonical store and the built client
+4. Start the real Go server with an empty `actions.jsonl` and the built client
    directory, on one strict loopback name and port.
 5. Wait for explicit health and replay-ready endpoints.
 6. Forward child output with component prefixes.
@@ -355,9 +355,8 @@ endpoint to establish a long precondition when setup is not the behavior under
 test, provided that endpoint creates a canonical game by replaying declared input
 actions rather than writing projection state directly.
 
-Never seed the projection database. Never mutate a snapshot to arrange a test.
-The fixture must remain reproducible after all projections and snapshots are
-deleted.
+Never seed the projection database. The fixture must remain reproducible after
+the projection database is deleted and rebuilt from `actions.jsonl`.
 
 ## 11. Privacy Testing
 
@@ -446,7 +445,7 @@ screen pixels.
 - Re-pair or restore its seat credential and verify the exact private revision.
 - Disconnect or restart the table client while the separate server remains
   running and verify the game remains durable.
-- Restart the server without changing the temporary canonical store.
+- Restart the server without changing the temporary JSONL action log.
 - Verify table and companions reconstruct identical projections.
 - Verify no client accepts actions while the server is unavailable.
 
