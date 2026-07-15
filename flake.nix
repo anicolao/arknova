@@ -41,8 +41,13 @@
       });
 
       devShells = forAllSystems (system: {
-        default = nixpkgs.legacyPackages.${system}.mkShell {
-          packages = with self.packages.${system}; [ extract-steam-assets tts-assets ];
+        default = let pkgs = nixpkgs.legacyPackages.${system}; in pkgs.mkShell {
+          packages = with pkgs; [
+            bun
+            go
+            nodejs
+            sqlite
+          ] ++ (with self.packages.${system}; [ extract-steam-assets tts-assets ]);
         };
       });
     };
