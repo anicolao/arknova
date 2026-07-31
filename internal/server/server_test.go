@@ -26,7 +26,12 @@ func TestHealthReportsInstalledBuildAndShutdownStopsServing(t *testing.T) {
 		ContentVersion:        "synthetic-1",
 		ArtifactFormatVersion: buildinfo.FormatVersion,
 	}
-	server, err := New(Config{DataDir: t.TempDir(), WebDir: webDir, Build: build})
+	server, err := New(Config{
+		DataDir:    t.TempDir(),
+		WebDir:     webDir,
+		ContentDir: filepath.Join("..", "..", "content", "synthetic"),
+		Build:      build,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

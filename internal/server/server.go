@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/anicolao/arknova/internal/buildinfo"
+	"github.com/anicolao/arknova/internal/content"
 	"github.com/anicolao/arknova/internal/eventlog"
 	"github.com/anicolao/arknova/internal/game"
 	"github.com/anicolao/arknova/internal/projections"
@@ -26,11 +27,12 @@ import (
 )
 
 type Config struct {
-	Listen, DataDir, WebDir, PublicURL string
-	Build                              buildinfo.Info
+	Listen, DataDir, WebDir, ContentDir, PublicURL string
+	Build                                          buildinfo.Info
 }
 type Server struct {
 	config  Config
+	catalog game.Catalog
 	store   *projections.Store
 	games   map[string]game.State
 	clients map[string]map[*websocket.Conn]int
@@ -40,6 +42,10 @@ type Server struct {
 }
 
 func New(config Config) (*Server, error) {
+	catalog, err := content.Load(config.ContentDir)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Join(config.DataDir, "games"), 0o755); err != nil {
 		return nil, err
 	}
@@ -47,7 +53,7 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{config: config, store: store, games: map[string]game.State{}, clients: map[string]map[*websocket.Conn]int{}}
+	s := &Server{config: config, catalog: catalog, store: store, games: map[string]game.State{}, clients: map[string]map[*websocket.Conn]int{}}
 	if err := s.replay(); err != nil {
 		store.Close()
 		return nil, err
@@ -56,9 +62,11 @@ func New(config Config) (*Server, error) {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /api/build", s.build)
 	mux.HandleFunc("POST /api/games", s.createGame)
+	mux.HandleFunc("POST /api/games/{gameID}/actions", s.submitAction)
 	mux.HandleFunc("GET /api/games/{gameID}/projection", s.getProjection)
 	mux.HandleFunc("GET /api/games/{gameID}/actions", s.diagnostics)
 	mux.HandleFunc("GET /ws", s.stream)
+	mux.Handle("GET /content/", http.StripPrefix("/content/", http.FileServer(http.Dir(config.ContentDir))))
 	mux.Handle("/", spa(config.WebDir))
 	s.http = &http.Server{Addr: config.Listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	return s, nil
@@ -122,7 +130,7 @@ func (s *Server) replay() error {
 		}
 		state := game.State{GameID: id}
 		for _, action := range actions {
-			state, err = game.Apply(state, action)
+			state, err = game.Apply(state, action, s.catalog)
 			if err != nil {
 				return fmt.Errorf("replay %s: %w", id, err)
 			}
@@ -157,6 +165,7 @@ func (s *Server) createGame(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		PlayerCount    int    `json:"playerCount"`
 		ClientActionID string `json:"clientActionId"`
+		Seed           string `json:"seed"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON", 400)
@@ -166,6 +175,17 @@ func (s *Server) createGame(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "playerCount must be 1-4", 400)
 		return
 	}
+	if body.ClientActionID == "" {
+		http.Error(w, "clientActionId is required", 400)
+		return
+	}
+	if testControls() && os.Getenv("ARKNOVA_GAME_SEED") != "" {
+		body.Seed = os.Getenv("ARKNOVA_GAME_SEED")
+	}
+	if body.Seed == "" {
+		http.Error(w, "seed is required", 400)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := s.newGameID()
@@ -173,8 +193,16 @@ func (s *Server) createGame(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "deterministic game already exists", 409)
 		return
 	}
-	action := game.Action{ActionID: s.newActionID(), ClientActionID: body.ClientActionID, Actor: game.Actor{Kind: "host"}, Type: "GameConfigured", SchemaVersion: 1, RecordedAtMS: s.nowMS(), Payload: game.GameConfiguredPayload{PlayerCount: body.PlayerCount}}
-	state, err := game.Apply(game.State{GameID: id}, action)
+	action := game.Action{
+		ActionID: s.newActionID(1), ClientActionID: body.ClientActionID,
+		Actor: game.Actor{Kind: "host"}, Type: "GameConfigured", SchemaVersion: 1,
+		RecordedAtMS: s.nowMS(), ExpectedRevision: 0,
+		Payload: game.ActionPayload{
+			PlayerCount: body.PlayerCount, Seed: body.Seed,
+			RulesetVersion: "base-v1", ContentVersion: s.catalog.Version, RNGVersion: "sha256-rank-v1",
+		},
+	}
+	state, err := game.Apply(game.State{GameID: id}, action, s.catalog)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -192,6 +220,64 @@ func (s *Server) createGame(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, s.response(r, state, 0))
 }
 
+func (s *Server) submitAction(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Player           int                `json:"player"`
+		Type             string             `json:"type"`
+		SchemaVersion    int                `json:"schemaVersion"`
+		ExpectedRevision int                `json:"expectedRevision"`
+		ClientActionID   string             `json:"clientActionId"`
+		Payload          game.ActionPayload `json:"payload"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON", 400)
+		return
+	}
+	if body.ClientActionID == "" {
+		http.Error(w, "clientActionId is required", 400)
+		return
+	}
+	id := strings.ToUpper(r.PathValue("gameID"))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.games[id]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if revision, duplicate := game.AcceptedRevision(state, body.ClientActionID); duplicate {
+		writeJSON(w, http.StatusOK, map[string]any{"revision": revision, "duplicate": true})
+		return
+	}
+	if body.ExpectedRevision != state.Revision {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "stale revision", "revision": state.Revision})
+		return
+	}
+	action := game.Action{
+		ActionID: s.newActionID(state.Revision + 1), ClientActionID: body.ClientActionID,
+		Actor: game.Actor{Kind: "player", Seat: body.Player}, Type: body.Type,
+		SchemaVersion: body.SchemaVersion, RecordedAtMS: s.nowMS(),
+		ExpectedRevision: body.ExpectedRevision, Payload: body.Payload,
+	}
+	next, err := game.Apply(state, action, s.catalog)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	offset, err := eventlog.Append(s.actionPath(id), action)
+	if err != nil {
+		http.Error(w, "persist action", 500)
+		return
+	}
+	if err := s.store.Put(next, offset); err != nil {
+		http.Error(w, "project action", 500)
+		return
+	}
+	s.games[id] = next
+	s.broadcastLocked(id, next)
+	writeJSON(w, http.StatusCreated, map[string]any{"revision": next.Revision, "actionId": action.ActionID})
+}
+
 func (s *Server) getProjection(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -201,7 +287,7 @@ func (s *Server) getProjection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	player, _ := strconv.Atoi(r.URL.Query().Get("player"))
-	projection, err := game.Project(state, player)
+	projection, err := game.Project(state, player, s.catalog)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -232,12 +318,13 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	player, _ := strconv.Atoi(r.URL.Query().Get("player"))
 	s.mu.Lock()
 	state, ok := s.games[id]
-	s.mu.Unlock()
 	if !ok {
+		s.mu.Unlock()
 		http.Error(w, "game not found", 404)
 		return
 	}
-	projection, err := game.Project(state, player)
+	_, err := game.Project(state, player, s.catalog)
+	s.mu.Unlock()
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -252,10 +339,23 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 		return
 	}
+	state = s.games[id]
+	projection, err := game.Project(state, player, s.catalog)
+	if err != nil {
+		s.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
 	if s.clients[id] == nil {
 		s.clients[id] = map[*websocket.Conn]int{}
 	}
 	s.clients[id][conn] = player
+	if err := conn.WriteJSON(projection); err != nil {
+		delete(s.clients[id], conn)
+		s.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
@@ -266,9 +366,6 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		_ = conn.Close()
 	}()
-	if err := conn.WriteJSON(projection); err != nil {
-		return
-	}
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			return
@@ -285,8 +382,18 @@ func (s *Server) response(r *http.Request, state game.State, player int) map[str
 	for i := range urls {
 		urls[i] = fmt.Sprintf("%s/play?gameid=%s&player=%d", strings.TrimRight(origin, "/"), state.GameID, i+1)
 	}
-	projection, _ := game.Project(state, player)
+	projection, _ := game.Project(state, player, s.catalog)
 	return map[string]any{"projection": projection, "companionUrls": urls}
+}
+
+func (s *Server) broadcastLocked(id string, state game.State) {
+	for conn, player := range s.clients[id] {
+		projection, err := game.Project(state, player, s.catalog)
+		if err != nil || conn.WriteJSON(projection) != nil {
+			_ = conn.Close()
+			delete(s.clients[id], conn)
+		}
+	}
 }
 
 func (s *Server) actionPath(id string) string {
@@ -307,9 +414,9 @@ func (s *Server) newGameID() string {
 	_, _ = rand.Read(b)
 	return strings.ToUpper(hex.EncodeToString(b))
 }
-func (s *Server) newActionID() string {
+func (s *Server) newActionID(revision int) string {
 	if testControls() && os.Getenv("ARKNOVA_DETERMINISTIC_IDS") == "1" {
-		return "action-0001"
+		return fmt.Sprintf("action-%04d", revision)
 	}
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)

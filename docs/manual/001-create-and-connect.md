@@ -33,5 +33,11 @@ ARKNOVA_DEV_ORIGIN=http://SERVER-NAME:5173 \
 
 ## Result
 
-- Status: **not yet executed on physical devices**
-- Observations/defects: record during testing
+- Status: **passed on physical devices**
+- Server commit: `3987c81` (merged Increment 001)
+- Tester: project owner
+- Date: 2026-07-31
+- Observations/defects: the initial LAN run exposed Vite host filtering and the
+  secure-origin-only `crypto.randomUUID()` API. Both were fixed before the
+  successful final run. Specific hardware and browser versions were not
+  recorded.

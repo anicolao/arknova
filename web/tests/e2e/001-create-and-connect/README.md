@@ -46,7 +46,7 @@ A host creates a two-player game on the shared table, both players join on priva
 
 **Verifications for Player 1 companion:**
 - [x] Device is assigned to player 1
-- [x] Private hand is empty
+- [x] Private starting hand is available
 - [x] Private projection is at revision 1
 
 ### Player 2 companion
@@ -55,7 +55,7 @@ A host creates a two-player game on the shared table, both players join on priva
 
 **Verifications for Player 2 companion:**
 - [x] Device is assigned to player 2
-- [x] Private hand is empty
+- [x] Private starting hand is available
 - [x] Private projection is at revision 1
 
 ---
@@ -77,7 +77,7 @@ A host creates a two-player game on the shared table, both players join on priva
 
 **Verifications for Player 1 companion:**
 - [x] Device is assigned to player 1
-- [x] Private hand is empty
+- [x] Private starting hand is available
 - [x] Private projection is at revision 1
 
 ### Player 2 companion
@@ -86,7 +86,7 @@ A host creates a two-player game on the shared table, both players join on priva
 
 **Verifications for Player 2 companion:**
 - [x] Device is assigned to player 2
-- [x] Private hand is empty
+- [x] Private starting hand is available
 - [x] Private projection is at revision 1
 
 ---

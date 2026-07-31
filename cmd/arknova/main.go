@@ -26,6 +26,7 @@ func run() error {
 	listen := flag.String("listen", env("ARKNOVA_LISTEN", "127.0.0.1:8080"), "HTTP listen address")
 	data := flag.String("data", env("ARKNOVA_DATA_DIR", "./data"), "game data directory")
 	web := flag.String("web", env("ARKNOVA_WEB_DIR", "./web/build"), "built web client directory")
+	content := flag.String("content", env("ARKNOVA_CONTENT_PACK", "./content/synthetic"), "content pack directory")
 	publicURL := flag.String("public-url", env("ARKNOVA_PUBLIC_URL", ""), "public URL used in companion QR codes")
 	buildInfoPath := flag.String("build-info", env("ARKNOVA_BUILD_INFO", ""), "installed build.json path")
 	flag.Parse()
@@ -34,7 +35,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	s, err := server.New(server.Config{Listen: *listen, DataDir: *data, WebDir: *web, PublicURL: *publicURL, Build: build})
+	s, err := server.New(server.Config{
+		Listen:     *listen,
+		DataDir:    *data,
+		WebDir:     *web,
+		ContentDir: *content,
+		PublicURL:  *publicURL,
+		Build:      build,
+	})
 	if err != nil {
 		return err
 	}
