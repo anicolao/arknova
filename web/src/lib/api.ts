@@ -1,11 +1,16 @@
 export type Projection = { gameId: string; playerCount: number; player?: number; revision: number };
 export type CreatedGame = { projection: Projection; companionUrls: string[] };
 
+function newClientActionId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return `browser-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
 export async function createGame(playerCount: number): Promise<CreatedGame> {
   const response = await fetch('/api/games', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ playerCount, clientActionId: crypto.randomUUID() })
+    body: JSON.stringify({ playerCount, clientActionId: newClientActionId() })
   });
   if (!response.ok) throw new Error(await response.text());
   return response.json();
