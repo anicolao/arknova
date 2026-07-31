@@ -1,4 +1,5 @@
 # Locally extracted copyrighted game assets.
+.DS_Store
 /steam-assets/
 /prototype-assets/
 /tts-assets/
