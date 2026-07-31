@@ -19,6 +19,9 @@ test('host creates a game and every device recovers after restart', async ({ bro
   const seat2Context = await browser.newContext({ viewport: { width: 390, height: 844 } });
 
   try {
+    await tableContext.addInitScript(() => {
+      Object.defineProperty(crypto, 'randomUUID', { value: undefined });
+    });
     const table = await tableContext.newPage();
     await table.goto(`${server.origin}/table`);
     await walkthrough.step('table_ready', {
