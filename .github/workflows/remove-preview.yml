@@ -1,0 +1,148 @@
+name: Remove preview
+
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: '37 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+  pull-requests: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  remove-closed:
+    name: Remove PR ${{ github.event.pull_request.number }}
+    if: >-
+      vars.KENOBI_PREVIEW_ENABLED == 'true' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: kenobi-preview-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Install the dedicated deployment identity
+        env:
+          DEPLOY_KEY: ${{ secrets.KENOBI_PREVIEW_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          [[ -n "$DEPLOY_KEY" ]]
+          install -m 600 /dev/null "$RUNNER_TEMP/kenobi-preview-key"
+          printf '%s\n' "$DEPLOY_KEY" >"$RUNNER_TEMP/kenobi-preview-key"
+          chmod 600 "$RUNNER_TEMP/kenobi-preview-key"
+
+      - name: Remove the preview route
+        run: |
+          ssh \
+            -i "$RUNNER_TEMP/kenobi-preview-key" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$GITHUB_WORKSPACE/.github/kenobi_known_hosts" \
+            arknova-deploy@matrix.morpheum.dev "remove $PR_NUMBER"
+
+      - name: Mark GitHub deployments inactive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          deployments="$(gh api --method GET --paginate --slurp \
+            -f environment="kenobi-pr-$PR_NUMBER" \
+            "repos/$REPOSITORY/deployments")"
+          jq -r '.[][] | .id' <<<"$deployments" | while read -r deployment_id; do
+            [[ "$deployment_id" =~ ^[1-9][0-9]*$ ]]
+            jq -n '{state: "inactive"}' \
+              | gh api --method POST "repos/$REPOSITORY/deployments/$deployment_id/statuses" --input - >/dev/null
+          done
+
+      - name: Update the sticky PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          marker='<!-- kenobi-preview -->'
+          comments="$(gh api --paginate --slurp "repos/$REPOSITORY/issues/$PR_NUMBER/comments")"
+          comment_id="$(jq -r --arg marker "$marker" \
+            '[.[][] | select(.body | contains($marker))][0].id // empty' <<<"$comments")"
+          if [[ -n "$comment_id" ]]; then
+            body="$(printf '%s\n\nStatus: removed after the pull request closed.' "$marker")"
+            jq -n --arg body "$body" '{body: $body}' \
+              | gh api --method PATCH "repos/$REPOSITORY/issues/comments/$comment_id" --input - >/dev/null
+          fi
+
+  reconcile:
+    name: Reconcile closed previews
+    if: >-
+      vars.KENOBI_PREVIEW_ENABLED == 'true' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: kenobi-preview-reconcile
+      cancel-in-progress: false
+    env:
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Install the dedicated deployment identity
+        env:
+          DEPLOY_KEY: ${{ secrets.KENOBI_PREVIEW_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$DEPLOY_KEY" ]]
+          install -m 600 /dev/null "$RUNNER_TEMP/kenobi-preview-key"
+          printf '%s\n' "$DEPLOY_KEY" >"$RUNNER_TEMP/kenobi-preview-key"
+          chmod 600 "$RUNNER_TEMP/kenobi-preview-key"
+
+      - name: Remove routes whose PR is no longer open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          deployments="$(gh api --paginate --slurp "repos/$REPOSITORY/deployments")"
+          mapfile -t pull_requests < <(jq -r \
+            '[.[][] | .environment | select(test("^kenobi-pr-[1-9][0-9]*$")) | sub("^kenobi-pr-"; "")] | unique[]' \
+            <<<"$deployments")
+          for pr in "${pull_requests[@]}"; do
+            [[ "$pr" =~ ^[1-9][0-9]*$ ]]
+            state="$(gh api "repos/$REPOSITORY/pulls/$pr" --jq '.state')"
+            if [[ "$state" == open ]]; then
+              continue
+            fi
+            [[ "$state" == closed ]]
+            ssh \
+              -i "$RUNNER_TEMP/kenobi-preview-key" \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o "UserKnownHostsFile=$GITHUB_WORKSPACE/.github/kenobi_known_hosts" \
+              arknova-deploy@matrix.morpheum.dev "remove $pr"
+            jq -r --arg environment "kenobi-pr-$pr" \
+              '.[][] | select(.environment == $environment) | .id' <<<"$deployments" \
+              | while read -r deployment_id; do
+                  [[ "$deployment_id" =~ ^[1-9][0-9]*$ ]]
+                  jq -n '{state: "inactive"}' \
+                    | gh api --method POST "repos/$REPOSITORY/deployments/$deployment_id/statuses" --input - >/dev/null
+                done
+          done

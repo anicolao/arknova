@@ -21,6 +21,7 @@ jobs:
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
       - run: nix develop --command go test ./...
+      - run: python3 -m unittest scripts/verify_preview_artifact_test.py -v
       - run: git diff --exit-code
 
   web:
