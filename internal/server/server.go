@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,13 +18,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anicolao/arknova/internal/buildinfo"
 	"github.com/anicolao/arknova/internal/eventlog"
 	"github.com/anicolao/arknova/internal/game"
 	"github.com/anicolao/arknova/internal/projections"
 	"github.com/gorilla/websocket"
 )
 
-type Config struct{ Listen, DataDir, WebDir, PublicURL string }
+type Config struct {
+	Listen, DataDir, WebDir, PublicURL string
+	Build                              buildinfo.Info
+}
 type Server struct {
 	config  Config
 	store   *projections.Store
@@ -30,6 +36,7 @@ type Server struct {
 	clients map[string]map[*websocket.Conn]int
 	mu      sync.Mutex
 	http    *http.Server
+	closing bool
 }
 
 func New(config Config) (*Server, error) {
@@ -47,6 +54,7 @@ func New(config Config) (*Server, error) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("GET /api/build", s.build)
 	mux.HandleFunc("POST /api/games", s.createGame)
 	mux.HandleFunc("GET /api/games/{gameID}/projection", s.getProjection)
 	mux.HandleFunc("GET /api/games/{gameID}/actions", s.diagnostics)
@@ -63,6 +71,36 @@ func (s *Server) ListenAndServe() error {
 	}
 	return err
 }
+
+func (s *Server) Serve(listener net.Listener) error {
+	err := s.http.Serve(listener)
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	s.closing = true
+	connections := make([]*websocket.Conn, 0)
+	for _, clients := range s.clients {
+		for connection := range clients {
+			connections = append(connections, connection)
+		}
+	}
+	s.mu.Unlock()
+	for _, connection := range connections {
+		_ = connection.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"),
+			time.Now().Add(time.Second),
+		)
+		_ = connection.Close()
+	}
+	return s.http.Shutdown(ctx)
+}
+
 func (s *Server) Close() error { return s.store.Close() }
 
 func (s *Server) replay() error {
@@ -100,7 +138,19 @@ func (s *Server) replay() error {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "games": len(s.games)})
+	s.mu.Lock()
+	games := len(s.games)
+	closing := s.closing
+	s.mu.Unlock()
+	if closing {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "stopping", "games": games, "build": s.config.Build})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "games": games, "build": s.config.Build})
+}
+
+func (s *Server) build(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.config.Build)
 }
 
 func (s *Server) createGame(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +246,26 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
+	if s.clients[id] == nil {
+		s.clients[id] = map[*websocket.Conn]int{}
+	}
+	s.clients[id][conn] = player
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.clients[id], conn)
+		if len(s.clients[id]) == 0 {
+			delete(s.clients, id)
+		}
+		s.mu.Unlock()
+		_ = conn.Close()
+	}()
 	if err := conn.WriteJSON(projection); err != nil {
 		return
 	}

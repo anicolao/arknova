@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  go:
+    name: ci/go
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
+      - run: nix develop --command go test ./...
+      - run: git diff --exit-code
+
+  web:
+    name: ci/web
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
+      - run: nix develop --command sh -c 'cd web && bun install --frozen-lockfile && bun run check:precommit'
+      - run: git diff --exit-code
+
+  e2e:
+    name: ci/e2e
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
+      - run: nix develop --command sh -c 'cd web && bun install --frozen-lockfile && bun run test:e2e:install && bun run test:e2e'
+      - run: git diff --exit-code
+      - name: Upload Playwright failure report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: playwright-failure-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            web/playwright-report
+            web/test-results
+          if-no-files-found: warn
+          retention-days: 7
+
+  linux-package:
+    name: ci/linux-package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
+      - run: nix build .#arknova-release --out-link result-release
+      - run: nix build .#package-preview --out-link result-packager
+      - name: Verify deterministic preview package
+        run: |
+          export PATH="$PWD/result-packager/bin:$PATH"
+          nix develop --command bash scripts/test-preview-package.sh "$PWD/result-release"
+      - name: Create deployment artifact
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RELEASE_PATH: ${{ github.workspace }}/result-release
+          OUTPUT_DIR: ${{ github.workspace }}/preview-artifact
+        run: result-packager/bin/package-arknova-preview
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: preview-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: preview-artifact
+          if-no-files-found: error
+          retention-days: 7
