@@ -12,6 +12,7 @@ trap cleanup EXIT
 
 for output in first second; do
   PR_NUMBER=5 \
+  PULL_REQUEST_TITLE='Deterministic package test' \
   RUN_ID=1234 \
   RUN_ATTEMPT=1 \
   HEAD_REPOSITORY=anicolao/arknova \
