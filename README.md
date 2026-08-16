@@ -99,6 +99,29 @@ nix develop --command go test ./...
 nix develop --command sh -c 'cd web && bun run check:precommit && bun run test:e2e'
 ```
 
+## Preview Release Package
+
+The deployable preview is a deterministic x86-64 Linux release containing the
+static Go server, built web client, and source-derived `build.json`:
+
+```console
+nix build .#packages.x86_64-linux.arknova-release
+file result/bin/arknova
+cat result/build.json
+```
+
+CI wraps that release in `release.tar.gz` plus a run-specific
+`deployment.json`; the latter records the PR, workflow run, full commit SHA,
+payload size, and SHA-256 digest. The packaging command requires those values as
+environment variables and refuses a non-static or non-x86-64 server.
+
+The committed `web/bun.nix` is the offline Nix dependency cache description
+derived from `web/bun.lock`. Regenerate it whenever the Bun lock changes:
+
+```console
+nix develop --command bun2nix --lock-file web/bun.lock --output-file web/bun.nix
+```
+
 All changes are pushed on focused branches and opened as draft pull requests for
 initial review. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
