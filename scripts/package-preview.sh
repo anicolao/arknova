@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-required=(PR_NUMBER RUN_ID RUN_ATTEMPT HEAD_REPOSITORY HEAD_SHA RELEASE_PATH OUTPUT_DIR)
+required=(PR_NUMBER PULL_REQUEST_TITLE RUN_ID RUN_ATTEMPT HEAD_REPOSITORY HEAD_SHA RELEASE_PATH OUTPUT_DIR)
 for name in "${required[@]}"; do
   if [[ -z "${!name:-}" ]]; then
     printf '%s is required\n' "$name" >&2
@@ -50,6 +50,7 @@ packaging_timestamp="${PACKAGING_TIMESTAMP:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
 
 jq -n \
   --argjson pullRequest "$PR_NUMBER" \
+  --arg pullRequestTitle "$PULL_REQUEST_TITLE" \
   --argjson sourceRunId "$RUN_ID" \
   --argjson sourceRunAttempt "$RUN_ATTEMPT" \
   --arg headRepository "$HEAD_REPOSITORY" \
@@ -60,6 +61,7 @@ jq -n \
   '{
     artifactFormatVersion: 1,
     pullRequest: $pullRequest,
+    pullRequestTitle: $pullRequestTitle,
     sourceRunId: $sourceRunId,
     sourceRunAttempt: $sourceRunAttempt,
     headRepository: $headRepository,
