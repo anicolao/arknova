@@ -115,6 +115,16 @@ CI wraps that release in `release.tar.gz` plus a run-specific
 payload size, and SHA-256 digest. The packaging command requires those values as
 environment variables and refuses a non-static or non-x86-64 server.
 
+After the Kenobi host module and DNS have been reviewed and activated, set the
+repository secret `KENOBI_PREVIEW_SSH_KEY` to the dedicated forced-command SSH
+private key and the repository variable `KENOBI_PREVIEW_ENABLED` to `true`.
+Successful CI runs for same-repository pull requests then deploy to
+`https://pr-<number>.arknova.morpheum.dev`. The trusted default-branch workflow
+re-checks the current PR SHA and verifies the complete artifact envelope before
+deployment. Closing a PR removes its route, and a daily reconciliation workflow
+cleans up any missed closures. Keep the enable variable unset until the host,
+wildcard certificate, DNS, and key have all been tested.
+
 The committed `web/bun.nix` is the offline Nix dependency cache description
 derived from `web/bun.lock`. Regenerate it whenever the Bun lock changes:
 
