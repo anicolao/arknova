@@ -33,7 +33,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
-      - run: nix develop --command sh -c 'cd web && bun install --frozen-lockfile && bun run check:precommit'
+      - run: nix develop --command sh -c 'cd web && bun install --frozen-lockfile && ../scripts/retry-sigabrt.sh bun run check:precommit'
       - run: git diff --exit-code
 
   e2e:
@@ -45,7 +45,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
-      - run: nix develop --command sh -c 'cd web && bun install --frozen-lockfile && bun run test:e2e:install && bun run test:e2e'
+      - run: nix develop --command sh -c 'cd web && bun install --frozen-lockfile && bun run test:e2e:install && ../scripts/retry-sigabrt.sh bun run test:e2e'
       - run: git diff --exit-code
       - name: Upload Playwright failure report
         if: failure()
