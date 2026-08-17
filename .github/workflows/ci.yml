@@ -25,7 +25,7 @@ jobs:
 
   web:
     name: ci/web
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -37,7 +37,7 @@ jobs:
 
   e2e:
     name: ci/e2e
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
