@@ -1,0 +1,31 @@
+{
+  "version": "synthetic-v1",
+  "assets": [
+    {
+      "path": "cards/placeholder.svg",
+      "mediaType": "image/svg+xml",
+      "width": 300,
+      "height": 420
+    }
+  ],
+  "cards": [
+    { "id": "synthetic-alpine-ibex", "name": "Alpine Ibex", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-amber-owl", "name": "Amber Owl", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-azure-newt", "name": "Azure Newt", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-bronze-lemur", "name": "Bronze Lemur", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-clouded-fox", "name": "Clouded Fox", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-coral-finch", "name": "Coral Finch", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-dune-badger", "name": "Dune Badger", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-emerald-gecko", "name": "Emerald Gecko", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-frost-hare", "name": "Frost Hare", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-golden-crane", "name": "Golden Crane", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-jade-otter", "name": "Jade Otter", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-lilac-marten", "name": "Lilac Marten", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-mossy-tortoise", "name": "Mossy Tortoise", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-river-pangolin", "name": "River Pangolin", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-sable-heron", "name": "Sable Heron", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-silver-jackal", "name": "Silver Jackal", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-sunset-tamarin", "name": "Sunset Tamarin", "image": "cards/placeholder.svg" },
+    { "id": "synthetic-violet-salamander", "name": "Violet Salamander", "image": "cards/placeholder.svg" }
+  ]
+}

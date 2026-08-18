@@ -93,7 +93,7 @@ function companionSurface(page: Page, player: number): Surface {
     id: `player-${player}`, name: `Player ${player} companion`, page,
     verifications: [
       { spec: `Device is assigned to player ${player}`, check: async () => expect(page.getByRole('heading', { name: `Player ${player}` })).toBeVisible() },
-      { spec: 'Private hand is empty', check: async () => expect(page.getByRole('heading', { name: 'Your hand is empty' })).toBeVisible() },
+      { spec: 'Private starting hand is available', check: async () => expect(page.getByTestId('hand-card')).toHaveCount(3) },
       { spec: 'Private projection is at revision 1', check: async () => expect(page.getByTestId('projection-revision')).toHaveText('Revision 1') }
     ]
   };

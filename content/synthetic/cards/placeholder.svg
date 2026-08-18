@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="420" viewBox="0 0 300 420">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d9bd6f"/>
+      <stop offset="1" stop-color="#477b6d"/>
+    </linearGradient>
+  </defs>
+  <rect width="300" height="420" rx="18" fill="#f4efe1"/>
+  <rect x="14" y="14" width="272" height="392" rx="12" fill="url(#background)"/>
+  <circle cx="150" cy="170" r="82" fill="#102d28" opacity=".82"/>
+  <path d="M96 210c19-58 42-89 70-93 9 25 23 43 43 55-23 13-37 36-43 69-27-6-50-16-70-31Z" fill="#f4efe1"/>
+  <text x="150" y="325" text-anchor="middle" fill="#102d28" font-family="Georgia,serif" font-size="25">SYNTHETIC</text>
+  <text x="150" y="355" text-anchor="middle" fill="#102d28" font-family="system-ui,sans-serif" font-size="13" letter-spacing="3">ZOO CARD</text>
+</svg>

@@ -19,6 +19,7 @@ export class TestServer {
       '-listen', new URL(this.origin).host,
       '-data', this.dataDir,
       '-web', resolve('build'),
+      '-content', resolve('../content/synthetic'),
       '-public-url', this.origin
     ], {
       env: {
@@ -26,7 +27,8 @@ export class TestServer {
         ARKNOVA_E2E: '1',
         ARKNOVA_ALLOW_TEST_CONTROLS: '1',
         ARKNOVA_FIXED_NOW_MS: '1710504000000',
-        ARKNOVA_DETERMINISTIC_IDS: '1'
+        ARKNOVA_DETERMINISTIC_IDS: '1',
+        ARKNOVA_GAME_SEED: 'increment-002-e2e-seed'
       },
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -39,9 +41,18 @@ export class TestServer {
   }
 
   async stop() {
-    if (!this.child || this.child.exitCode !== null) return;
-    this.child.kill('SIGTERM');
-    await new Promise<void>((resolveExit) => this.child?.once('exit', () => resolveExit()));
+    const child = this.child;
+    if (!child) return;
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      await new Promise<void>((resolveExit) => child.once('exit', () => resolveExit()));
+    }
+    this.child = undefined;
+  }
+
+  async deleteProjectionStore() {
+    if (this.child) throw new Error('stop the server before deleting projections');
+    await rm(join(this.dataDir, 'projections.sqlite'), { force: true });
   }
 
   async dispose() {

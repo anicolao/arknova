@@ -10,7 +10,7 @@ import (
 
 func TestAppendReadAndRejectPartialTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "actions.jsonl")
-	action := game.Action{Type: "GameConfigured", SchemaVersion: 1, Payload: game.GameConfiguredPayload{PlayerCount: 2}}
+	action := game.Action{Type: "GameConfigured", SchemaVersion: 1, Payload: game.ActionPayload{PlayerCount: 2}}
 	if _, err := Append(path, action); err != nil {
 		t.Fatal(err)
 	}

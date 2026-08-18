@@ -63,10 +63,12 @@ base-game rules reference.
 
 ## Status
 
-Increment 001 is implemented: the Go server can create and durably restore a
-two-player game, serve the SvelteKit table and companion clients, and display
-stable companion QR codes. The game currently stops at connected empty player
-areas; gameplay rules arrive in later tracer bullets.
+Increment 001 is merged and has passed its physical table-and-phone test.
+Increment 002 is implemented on its focused branch: a pinned synthetic content
+pack is deterministically dealt into a public display and private hands, players
+can alternate the X-token action through five ordered action cards, and deleting
+SQLite still recovers the exact state from the canonical JSONL actions. Its
+physical-device acceptance remains outstanding.
 
 ## Development Environment
 
@@ -85,6 +87,7 @@ nix develop --command go run ./cmd/arknova \
   -listen 0.0.0.0:8080 \
   -data ./data \
   -web ./web/build \
+  -content ./content/synthetic \
   -public-url http://YOUR-SERVER-NAME:8080
 ```
 
