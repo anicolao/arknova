@@ -12,11 +12,20 @@ interacting with and observing the physical table and companion devices. The
 deployment, device entry point, scenario preparation, server maintenance, and
 test evidence should be supplied automatically.
 
-This document describes the target design and the incremental work needed in
-this repository and in Kenobi's NixOS configuration. It is a plan, not a claim
-that the deployment system already exists.
+This document records the target design and the incremental work shared by this
+repository and Kenobi's NixOS configuration.
 
-## Current Baseline
+## Implementation Status
+
+The core per-PR deployment path was implemented and production-validated on
+2026-08-17: trusted same-repository PRs run CI, publish the exact verified
+artifact, deploy behind a stable PR hostname, and report that commit through
+the health endpoint and GitHub deployment. Physical-table workflows and the
+remaining acceptance criteria below are still planned. Operational procedure
+and rollout evidence live in `ARKNOVA_PREVIEW_OPERATIONS.md` and
+`ARKNOVA_PREVIEW_ROLLOUT.md` in Kenobi's configuration repository.
+
+## Original Baseline
 
 The following observations were verified on 2026-08-16 and are included to
 make the proposed changes distinguishable from infrastructure that already
